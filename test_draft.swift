@@ -34,14 +34,14 @@ import Foundation
         }
         assert(ClaudeChat.endsInMention("tanya @budi ") && !ClaudeChat.endsInMention("@budi cek ini") && !ClaudeChat.endsInMention(""))
         assert(ClaudeChat.endsInMention("/review") && !ClaudeChat.endsInMention("/review cek ini") && !ClaudeChat.endsInMention("baca a/b"))
-        // Sessions: only live interactive ones that are working; the latest first.
+        // Sessions: only live interactive ones that are working or waiting for you; waiting first, then the latest.
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("tbk-\(UUID().uuidString)")
         try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        for (pid, kind, status) in [(1, "interactive", "busy"), (2, "interactive", "waiting"), (3, "interactive", "idle"), (4, "print", "busy"), (5, "interactive", "busy"), (6, "interactive", "busy")] {
+        for (pid, kind, status) in [(1, "interactive", "busy"), (2, "interactive", "waiting"), (3, "interactive", "idle"), (4, "print", "busy"), (5, "interactive", "busy"), (6, "interactive", "busy"), (7, "interactive", "waiting")] {
             try! "{\"pid\":\(pid),\"kind\":\"\(kind)\",\"status\":\"\(status)\",\"statusUpdatedAt\":\(pid)}".write(to: dir.appendingPathComponent("\(pid).json"), atomically: true, encoding: .utf8)
         }
         try! "secret".write(to: dir.appendingPathComponent("1.abc.key"), atomically: true, encoding: .utf8)
-        assert(Session.active(in: dir, alive: { $0 != 5 }).map(\.pid) == [6, 1])
+        assert(Session.active(in: dir, alive: { $0 != 5 }).map(\.pid) == [7, 2, 6, 1])   // waiting ones first
         try? FileManager.default.removeItem(at: dir)
         // Plan: the name and, for Max, its size; the rest of the file is ignored.
         func plan(_ json: String) -> [String] { (try? JSONDecoder().decode(Plan.self, from: Data(json.utf8)))?.lines ?? ["?"] }

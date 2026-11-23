@@ -1,122 +1,69 @@
-# TouchDo for Claude
+<p align="center"><img src="assets/logo.png" width="128" alt="TouchDo logo"></p>
 
-Your Claude limits, running Claude Code sessions and a to-do list, live on the MacBook Pro Touch Bar.
+<h1 align="center">TouchDo for Claude</h1>
 
-**[Bahasa Indonesia](README.id.md)**
+<p align="center">Your Claude limits, running Claude Code sessions and to-dos, right on the Touch Bar.<br>
+<a href="README.id.md">Bahasa Indonesia</a></p>
 
-```
- ✳ Max   5h   ███░░░░░░░  30% ↻04:10      ● Fix the login bug  24m
-   5x    Week ██░░░░░░░░  17% ↻Sat 13:00  ● Write the tests     3m      ‹ ☑² ☕ 🎙  ☀ 🔊
-```
+![TouchDo on a real Touch Bar](assets/touchbar.png)
 
-> Unofficial. Not made by, affiliated with or endorsed by Anthropic. "Claude" is their trademark. The logo on the bar
-> is the icon of the Claude app installed on your Mac; none of it ships with this project.
+No more switching windows to see how much of your Claude plan is left. It's just there, next to your to-dos.
 
-## What it does
+## What you get
 
-- **Claude limits at the far left.** 5-hour and weekly use as bars, with reset times. Green, yellow from 50%, red from 80%.
-- **Your plan** (Pro, Max 5x…) and the **Claude Code sessions working right now**, with how long they have been at it.
-- **Out of the way while you type.** Any key (except ⌘ and ⌃ shortcuts) brings back the app's own Touch Bar and typing suggestions; a second after
-  you stop, the limits return.
-- **To-dos with deadlines.** Add, edit, tick and delete them on the Touch Bar or from the menu bar. The colour shows how
-  close the deadline is, the red badge how many are open.
-- **Send a to-do to Claude Code** with the paper plane *(experimental, see below)*.
-- **Hold the mic to talk to Claude**, or double tap to keep dictating until the next tap.
-- **☕ Keep awake**, by itself or through [Insomnia](https://github.com/krishhgg/Insomnia) 0.2.0 or later, which also works with the lid closed.
+- **Your limits**: 5-hour and weekly use, with reset times. Green, yellow from 50%, red from 80%.
+- **Your sessions**: the Claude Code sessions working right now, and for how long. One that's waiting for your
+  permission or answer turns **yellow** and moves to the front.
+- **To-dos**: add, tick and set deadlines from the Touch Bar or the menu bar.
+- **Paper plane**: sends a to-do to a new Claude Code session (experimental).
+- **Mic**: hold to talk to Claude, double tap to keep it on.
+- **☕**: keeps your Mac awake. Uses [Insomnia](https://github.com/krishhgg/Insomnia) if you have it.
 
-The buttons and menus are in Indonesian.
-
-## Requirements
-
-- A MacBook Pro with a Touch Bar **and a physical Esc key** (16-inch 2019, 13-inch 2020 or later), macOS 13 or later. Only
-  tested on macOS 27.0.1. On models whose Esc is on the Touch Bar (2016–2019), the limits bar covers Esc, so they are not
-  supported.
-- Xcode command line tools: `xcode-select --install`
-- [Claude Code](https://claude.com/claude-code) for the limits and sessions, and the Claude desktop app for voice and the
-  paper plane. The to-dos and ☕ need neither.
+Start typing and it gets out of the way, so you still get typing suggestions. A second after you stop, it's back.
+The buttons are in Indonesian.
 
 ## Install
 
-1. Get the code and build it. This installs `~/Applications/TouchDo.app` and starts it at every login.
+You need a MacBook Pro with a Touch Bar **and a real Esc key** (16-inch 2019, or 13-inch 2020 and later) and the Xcode
+command line tools (`xcode-select --install`).
 
-   ```bash
-   git clone https://github.com/rasyachremony/touchdo-for-claude.git
-   cd touchdo-for-claude
-   ./build.sh
-   ```
+```bash
+git clone https://github.com/rasyachremony/touchdo-for-claude.git
+cd touchdo-for-claude
+./build.sh
+```
 
-2. Give it Accessibility: **System Settings → Privacy & Security → Accessibility**, then turn on **TouchDo**.
-   If it isn't listed, press **+** and choose `TouchDo.app` from the Applications folder in your home folder. Until then
-   the limits stay hidden, because TouchDo can't tell whether you are typing.
+Then:
 
-3. In **System Settings → Keyboard → Touch Bar Settings**, set "Touch Bar shows" to **App Controls** and turn on
-   **Show Control Strip**.
+1. **System Settings → Privacy & Security → Accessibility**: turn on **TouchDo**. It needs this to know when you're typing.
+2. **System Settings → Keyboard → Touch Bar Settings**: pick **App Controls** and turn on **Show Control Strip**.
+3. For the mic, set Claude's dictation shortcut to **⌃⌥⌘D**.
 
-4. Voice only: in the Claude app's settings, set the Quick Entry dictation shortcut to **⌃⌥⌘D**, or change
-   `pressClaudeShortcut` in `main.swift` to yours and run `./build.sh` again.
+That's it. It starts by itself every time you log in.
 
-5. Optional: bars that follow every Claude Code reply. Paste [statusline-usage.sh](statusline-usage.sh) into your
-   [status line script](https://code.claude.com/docs/en/statusline).
+**Optional:** paste [statusline-usage.sh](statusline-usage.sh) into your
+[Claude Code status line script](https://code.claude.com/docs/en/statusline) so the limits update after every reply.
 
-## How to use it
+## Things you should know
 
-| Do this | To |
-|---|---|
-| Tap the ☑ ☕ 🎙 button in the Control Strip | open TouchDo |
-| Tap **+**, type, press Return, pick a date | add a to-do (Esc cancels) |
-| Tap a to-do | run it in Claude Code, tick, edit, date or delete it |
-| Hold 🎙 / double tap 🎙 | talk while held / keep dictating until the next tap |
-| Tap ☕, pick a time | keep the Mac awake |
-| Click the checklist in the menu bar | see limits, add or edit to-dos with the mouse |
+- **It uses a bit of your plan.** If the limits haven't updated in five minutes, TouchDo asks Claude Code with one tiny
+  Haiku request (about 1,100 tokens). That can add up over a day, and it can start a new 5-hour window. The optional
+  step above makes it run much less. To turn it off, set `autoRefresh` in `main.swift` to `.infinity` and run
+  `./build.sh` again.
+- **The paper plane starts a real session**, in whatever folder and permission mode Claude has selected, with any files
+  still attached there. If it can't confirm the send, it beeps and leaves the text for you.
+- **Your data stays on your Mac.** Apart from that tiny request, TouchDo sends nothing anywhere. It reads Claude Code's
+  own files for your sessions and plan, and only reads what you type while you're typing a to-do.
+- **The build is signed ad hoc**, so Accessibility is tied to the app's id. Another app signed with the same id would get
+  it too. To avoid that, sign with your own certificate and drop the `-r=...` part of the `codesign` line in `build.sh`.
+- **It uses private Apple APIs**, so a macOS update can break it. Tested on macOS 27.
+- **Not made by Anthropic.** "Claude" is their trademark.
 
-While you type a to-do, the usual editing keys work: ⌘A, ⌘C, ⌘X, ⌘V, ⌘Z, ⌥⌫, ⌘⌫, ⇧ with the arrows, ⌃A, ⌃E, ⌃K.
+## Problems?
 
-### The paper plane (experimental)
-
-It opens a new Claude Code session with the to-do filled in, then presses Return once, and only if that exact text is in
-the new-session box with Claude in front. **The session starts with the folder and permission mode selected in Claude**,
-and with any files you left attached there. If the last word contains an `@` or starts with `/`, the text is filled
-in but not sent. If something doesn't match or the send can't be confirmed, TouchDo beeps; check Claude before sending it
-yourself.
-
-## What it reads and what it costs
-
-Nothing is sent anywhere by TouchDo itself. It reads:
-
-- `~/.claude/sessions/*.json` for the running sessions, and `~/.claude.json`, of which only the plan fields are decoded.
-- Key presses: while idle only *that* a key was pressed (and whether ⌘ or ⌃ was held), to step aside. The keys themselves are read only while you type
-  a to-do, and not in password fields.
-- Claude's window, through Accessibility, only after you tap the paper plane.
-- If Insomnia is running: its version, and `session.json` and `config.json` in `~/Library/Application Support/Insomnia`.
-- The clipboard, only when you press ⌘V while typing a to-do.
-
-When you are signed in with a Claude plan and the limits are five minutes old, it runs one tiny `claude -p` request (Haiku,
-no tools, not saved), and again every five minutes until something else updates them. **That uses about 1,100 input tokens
-of your plan each time**, so up to 288 times (about 320,000 tokens) a day on a Mac that stays awake, and it can start a new
-5-hour window while you are not using Claude. Only install step 5 lets your own sessions update the limits, so without it
-this also runs while you use Claude Code. To switch it off, set `autoRefresh` in `main.swift` to `.infinity` and run
-`./build.sh` again; the bars then need step 5.
-
-Your to-dos stay in `~/Library/Application Support/io.github.rasyachremony.TouchDo/todos.json`.
-
-## Good to know
-
-- It uses Apple's private Touch Bar API, so a macOS update can break it. If the API is gone, TouchDo quits quietly.
-- The session, plan and limit files are Claude Code's own, not a documented API. If they change, those parts go empty.
-- The build is signed ad hoc, and the Accessibility permission is tied to the bundle id so it survives rebuilds. Another
-  program on your Mac signed with the same id would get that permission too. If that matters to you, edit the `codesign`
-  line in `build.sh`: replace `--sign -` with `--sign "Your Certificate"` and delete the whole `-r=...` argument, which would
-  keep the permission tied to the id alone. Rebuild, then remove TouchDo from the Accessibility list and add it again.
-
-## Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| No bars at the far left | Check step 2. If TouchDo is already on there, remove it with **−** and add it again. |
-| Bars show "–" | Sign in to Claude Code (an API key has no plan limits). TouchDo looks for `claude` in `~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin` and `/usr/local/bin`; if `which claude` says it is elsewhere, run `mkdir -p ~/.local/bin && ln -s "$(which claude)" ~/.local/bin/claude`, or do step 5. Then wait up to five minutes. |
-| Mic does nothing | Open Claude, wait five seconds, and check the shortcut in step 4. |
-| Mic works the wrong way round | The shortcut is a toggle. Stop dictation with TouchDo's mic, not in Claude, and stop it before rebuilding or uninstalling. |
-| The button is missing from the Control Strip | `launchctl kickstart -k gui/$(id -u)/io.github.rasyachremony.TouchDo` |
+- **Nothing on the left:** check the Accessibility switch. If it's on, remove TouchDo with **−** and add it again.
+- **Limits show "–":** sign in to Claude Code and wait five minutes.
+- **Mic does nothing:** open Claude, wait a few seconds, and check the shortcut.
 
 ## Uninstall
 
@@ -124,13 +71,4 @@ Your to-dos stay in `~/Library/Application Support/io.github.rasyachremony.Touch
 ./build.sh uninstall
 ```
 
-Your to-dos are kept. Also remove TouchDo from the Accessibility list, and the `statusline-usage.sh` lines from your status
-line script if you added them.
-
-## Development
-
-`main.swift` is the app; `Draft`, `ClaudeChat`, `Sessions` and `Plan` are the parts with a self-check:
-
-```bash
-./test.sh
-```
+Your to-dos stay. Remove TouchDo from the Accessibility list too.

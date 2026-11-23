@@ -297,7 +297,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
     private weak var sessionsView: NSTextField?
     private var sessionsWidth: NSLayoutConstraint?
 
-    /// Sessions working right now, in two small lines and up to three columns: "● name 6m".
+    /// Sessions working right now, in two small lines and up to three columns: "● name 6m". Yellow ones wait for you.
     private func showSessions() {
         guard let view = sessionsView else { return }
         let active = Session.active()
@@ -320,15 +320,22 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
                 if column > 0 { add("\t", .clear, nameFont) }
                 let minutes = max(0, Int(Date().timeIntervalSince1970 - (session.statusUpdatedAt ?? 0) / 1000) / 60)
                 var tail = session.statusUpdatedAt == nil ? "" : minutes < 60 ? " \(minutes)m" : " \(minutes / 60)j"
+                if session.needsYou { tail = session.waitingFor == "permission prompt" ? " izin" : " nunggu" }
                 if index == shown.count - 1, active.count > shown.count { tail += " +\(active.count - shown.count)" }
                 var name = session.name?.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespaces) ?? ""
                 if name.isEmpty { name = "Claude Code" }
                 while width("● " + name + tail) > cell - 8, name.count > 4 {   // shorten to its column
                     name = String(name.dropLast(name.hasSuffix("…") ? 2 : 1)).trimmingCharacters(in: .whitespaces) + "…"
                 }
-                add("● ", .systemGreen, nameFont)
-                add(name, NSColor(white: 1, alpha: 0.85), nameFont)
-                add(tail, NSColor(white: 1, alpha: 0.5), nameFont)
+                if session.needsYou {                  // asking permission or a question: yellow until you answer
+                    add("● ", .systemYellow, nameFont)
+                    add(name, .systemYellow, nameFont)
+                    add(tail, NSColor.systemYellow.withAlphaComponent(0.6), nameFont)
+                } else {
+                    add("● ", .systemGreen, nameFont)
+                    add(name, NSColor(white: 1, alpha: 0.85), nameFont)
+                    add(tail, NSColor(white: 1, alpha: 0.5), nameFont)
+                }
             }
         }
         if !text.isEqual(to: view.attributedStringValue) {
