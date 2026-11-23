@@ -72,3 +72,7 @@ That's it. It starts by itself every time you log in.
 ```
 
 Your to-dos stay. Remove TouchDo from the Accessibility list too.
+
+## License
+
+[MIT](LICENSE)

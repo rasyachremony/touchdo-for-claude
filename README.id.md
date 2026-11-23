@@ -72,3 +72,7 @@ Selesai. Tiap login dia nyala sendiri.
 ```
 
 To-do kamu tetap aman. Hapus juga TouchDo dari daftar Accessibility.
+
+## Lisensi
+
+[MIT](LICENSE)
