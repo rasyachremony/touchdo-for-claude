@@ -301,27 +301,36 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         return image
     }
 
-    // Sessions working right now, one chip each ("● name 6m"), in a row you can scroll; tap one to open it in the
-    // Claude app. Yellow ones wait for you.
+    // Sessions working right now, one numbered chip each ("1 name 6m"), in a row you can scroll; tap one to open it
+    // in the Claude app. A session keeps its number as long as its process lives (also while idle and hidden), and
+    // the chips stay in number order, so nothing moves. Yellow ones wait for you; the one you opened shrinks to its
+    // number and time, brighter.
     private lazy var sessionScrubber = makeScrubber(width: 300)
     private var sessions: [Session] = []
-    private var openedSession: Int32?        // the one you tapped last: kept at the far left, a little brighter
+    private var openedSession: Int32?        // the one you tapped last, a little brighter
+    private var sessionNumbers: [Int32: Int] = [:]
 
     private func showSessions() {
         var active = Session.active()
-        if let i = active.firstIndex(where: { $0.pid == openedSession }) { active.insert(active.remove(at: i), at: 0) }
+        sessionNumbers = sessionNumbers.filter { kill($0.key, 0) == 0 || errno == EPERM }   // a gone session frees its number
+        for session in active where sessionNumbers[session.pid] == nil {
+            sessionNumbers[session.pid] = (1...).first { !sessionNumbers.values.contains($0) }   // the lowest free one
+        }
+        active.sort { sessionNumbers[$0.pid] ?? 0 < sessionNumbers[$1.pid] ?? 0 }
         // Room right of the limits: the app area is 685 pt, less gaps and edges (measured on the device).
-        let room = max(90, 600 - (usageWidth?.constant ?? 170) - (planWidth?.constant ?? 50) - 52)   // 52: the mic and its gap
+        let room = max(90, 600 - (usageWidth?.constant ?? 210) - (planWidth?.constant ?? 50) - 52)   // 52: the mic and its gap
         sessionScrubber.constraints.first { $0.firstAttribute == .width }?.constant = room
         let changed = active.map(\.pid) != sessions.map(\.pid)
         let texts = sessions.indices.map(sessionText)
         sessions = active
-        if changed { sessionScrubber.reloadData() }        // keeps where you scrolled while the list stays the same
-        else if sessions.indices.map(sessionText) != texts { sessionScrubber.reloadItems(at: IndexSet(sessions.indices)) }
+        let fresh = sessions.indices.map(sessionText)
+        // reloadItems keeps where you scrolled but not the layout: a chip that changed width needs a full reload.
+        if changed || fresh.map({ ceil($0.size().width) }) != texts.map({ ceil($0.size().width) }) { sessionScrubber.reloadData() }
+        else if fresh != texts { sessionScrubber.reloadItems(at: IndexSet(sessions.indices)) }
     }
 
     private func sessionText(_ index: Int) -> NSAttributedString {
-        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        let font = NSFont.systemFont(ofSize: 11, weight: .medium)
         guard sessions.indices.contains(index) else {
             return NSAttributedString(string: "○ tidak ada sesi jalan", attributes: [.font: font, .foregroundColor: NSColor(white: 1, alpha: 0.35)])
         }
@@ -331,9 +340,11 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         if session.needsYou { tail = session.waitingFor == "permission prompt" ? " izin" : " nunggu" }
         var name = session.name?.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespaces) ?? ""
         if name.isEmpty { name = "Claude Code" }
-        if name.count > 28 { name = String(name.prefix(27)).trimmingCharacters(in: .whitespaces) + "…" }
+        if name.count > 16 { name = String(name.prefix(15)).trimmingCharacters(in: .whitespaces) + "…" }
+        if session.pid == openedSession { name = "" }          // you're in it already: number and time are enough
         let main = session.needsYou ? NSColor.systemYellow : NSColor(white: 1, alpha: 0.9)
-        let text = NSMutableAttributedString(string: "● ", attributes: [.font: font, .foregroundColor: session.needsYou ? NSColor.systemYellow : NSColor.systemGreen])
+        let number = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .heavy)
+        let text = NSMutableAttributedString(string: "\(sessionNumbers[session.pid] ?? index + 1)" + (name.isEmpty ? "" : " "), attributes: [.font: number, .foregroundColor: session.needsYou ? NSColor.systemYellow : NSColor.systemGreen])
         text.append(NSAttributedString(string: name, attributes: [.font: font, .foregroundColor: main]))
         text.append(NSAttributedString(string: tail, attributes: [.font: font, .foregroundColor: main.withAlphaComponent(0.6)]))
         return text
@@ -343,8 +354,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         sessionScrubber.selectedIndex = -1          // so tapping the same chip again opens it again
         guard sessions.indices.contains(index), let link = sessions[index].appLink else { return NSSound.beep() }
         openedSession = sessions[index].pid
-        showSessions()
-        sessionScrubber.scrollItem(at: 0, to: .leading)
+        sessionScrubber.reloadData()                // it shrinks to its number: lay the row out again
         NSWorkspace.shared.open(link)
     }
 
@@ -523,50 +533,46 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         return logo
     }
 
-    /// One column per limit: its name and reset small on top, the percent big below, coloured green / yellow / red.
-    /// 5h ↻00:20   Week ↻Sab   Fable ↻Sab
-    /// 20%         53%         27%
-    /// Exact reset times are in the menu bar.
+    /// Small lines of ASCII bars, coloured part = used (green / yellow / red), then percent and reset time;
+    /// a third one for a model's own weekly limit when Claude Code reports one:
+    /// 5h    ██░░░░░░░░  19% ↻04:10
+    /// Week  ██░░░░░░░░  16% ↻Sab 13:00
+    /// Fable █░░░░░░░░░   8% ↻Sab 13:00
     private func usageText() -> NSAttributedString {
-        var columns = [("5h", usage.five_hour, false), ("Week", usage.seven_day, true)]
-        if let model = usage.seven_day_model { columns.append((String((model.name ?? "Model").prefix(6)), model, true)) }
-        let small = NSFont.systemFont(ofSize: 9, weight: .semibold), big = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .bold)
-        let label = NSColor(white: 1, alpha: 0.7), dim = NSColor(white: 1, alpha: 0.35)
-        let day = DateFormatter()
-        day.locale = Locale(identifier: "id_ID")
-        day.dateFormat = "EEE"
-        let cells = columns.map { name, limit, weekly -> (top: NSAttributedString, bottom: NSAttributedString) in
-            let top = NSMutableAttributedString(string: name, attributes: [.font: small, .foregroundColor: label])
-            if let reset = limit?.resets_at.map({ Date(timeIntervalSince1970: $0) }), reset > Date() {
-                top.append(NSAttributedString(string: " ↻" + (weekly ? day.string(from: reset) : resetLabel(reset, weekday: false)),
-                                              attributes: [.font: small, .foregroundColor: dim]))
-            }
-            let p = percent(limit)
-            let bottom = NSAttributedString(string: p.map { "\(Int($0))%" } ?? "–", attributes: [.font: big, .foregroundColor: p.map(limitColor) ?? dim])
-            return (top, bottom)
-        }
-        // Tab stops at each column's start, wide enough for its longer line.
-        var stops: [CGFloat] = [], x: CGFloat = 0
-        for cell in cells.dropLast() { x += ceil(max(cell.top.size().width, cell.bottom.size().width)) + 10; stops.append(x) }
-        func line(_ height: CGFloat) -> NSParagraphStyle {
-            let style = NSMutableParagraphStyle()
-            style.minimumLineHeight = height
-            style.maximumLineHeight = height
-            style.lineBreakMode = .byClipping
-            style.tabStops = stops.map { NSTextTab(textAlignment: .left, location: $0) }
-            return style
-        }
+        let dim = NSColor(white: 1, alpha: 0.22), label = NSColor(white: 1, alpha: 0.7)
+        var rows = [("5h", usage.five_hour, false), ("Week", usage.seven_day, true)]
+        if let model = usage.seven_day_model { rows.append((String((model.name ?? "Model").prefix(5)), model, true)) }
+        let font = rows.count > 2 ? NSFont.monospacedSystemFont(ofSize: 8, weight: .semibold) : smallFont
+        let lines = smallLines(height: rows.count > 2 ? 10 : 14)
         let text = NSMutableAttributedString()
-        for (row, height) in [(0, CGFloat(12)), (1, CGFloat(16))] {   // 28 of the Touch Bar's 30 pt
-            let start = text.length
-            if row > 0 { text.append(NSAttributedString(string: "\n")) }
-            for (i, cell) in cells.enumerated() {
-                if i > 0 { text.append(NSAttributedString(string: "\t", attributes: [.font: small])) }
-                text.append(row == 0 ? cell.top : cell.bottom)
+        func add(_ s: String, _ color: NSColor) {
+            text.append(NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color, .paragraphStyle: lines]))
+        }
+        let nameWidth = rows.map(\.0.count).max() ?? 4
+        for (i, (name, limit, weekday)) in rows.enumerated() {
+            let p = percent(limit), cells = 10
+            let filled = p.map { $0 > 0 ? max(1, min(cells, Int(($0 / 10).rounded()))) : 0 } ?? 0   // any use shows a block
+            let color = p.map(limitColor) ?? dim
+            add((i > 0 ? "\n" : "") + name.padding(toLength: nameWidth, withPad: " ", startingAt: 0) + " ", label)
+            add(String(repeating: "█", count: filled), color)
+            add(String(repeating: "░", count: cells - filled), p == nil ? dim : color.withAlphaComponent(0.35))
+            add(p.map { String(format: " %3d%%", Int($0)) } ?? "    –", p == nil ? dim : color)
+            if let reset = limit?.resets_at.map({ Date(timeIntervalSince1970: $0) }), reset > Date() {
+                add(" ↻" + resetLabel(reset, weekday: weekday), label.withAlphaComponent(0.5))
             }
-            text.addAttribute(.paragraphStyle, value: line(height), range: NSRange(location: start, length: text.length - start))
         }
         return text
+    }
+
+    private let smallFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+
+    private func smallLines(height: CGFloat = 14, tabs: [CGFloat] = []) -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.maximumLineHeight = height         // 14: two lines in the 30 pt Touch Bar, 10: three
+        style.minimumLineHeight = height
+        style.lineBreakMode = .byClipping
+        style.tabStops = tabs.map { NSTextTab(textAlignment: .left, location: $0) }
+        return style
     }
 
     private func twoLineLabel() -> NSTextField {
@@ -626,6 +632,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
             return item
         case .usage:                           // 5-hour and weekly Claude limits, updated live from usage.json
             let view = twoLineLabel()
+            view.maximumNumberOfLines = 3
             view.attributedStringValue = usageText()
             usageWidth = view.widthAnchor.constraint(equalToConstant: ceil(view.attributedStringValue.size().width) + 4)
             usageWidth?.isActive = true
@@ -915,7 +922,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
 
     func scrubber(_ scrubber: NSScrubber, layout: NSScrubberFlowLayout, sizeForItemAt index: Int) -> NSSize {
         if scrubber === dateScrubber { return NSSize(width: 92, height: 30) }
-        if scrubber === sessionScrubber { return NSSize(width: sessionText(index).size().width + 22, height: 30) }
+        if scrubber === sessionScrubber { return NSSize(width: sessionText(index).size().width + 14, height: 30) }
         return NSSize(width: min(chipText(index).size().width + 28, 300), height: 30)
     }
 
