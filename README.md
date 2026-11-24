@@ -14,8 +14,9 @@ No more switching windows to see how much of your Claude plan is left. It's just
 - **Your limits**: 5-hour and weekly use, plus the weekly Fable limit when your plan has one, with reset times.
   Green, yellow from 50%, red from 80%. They refresh every minute.
 - **Token total**: a small line under your plan with every token Claude Code has used on this Mac, like "10.2B token".
-- **Your sessions**: the Claude Code sessions working right now, and for how long. One that's waiting for your
-  permission or answer turns **yellow** and moves to the front.
+- **Your sessions**: the Claude Code sessions working right now, and for how long, in a row you can swipe. Tap one
+  to open it in the Claude app. One that's waiting for your permission or answer turns **yellow** and moves to the
+  front.
 - **To-dos**: add, tick and set deadlines from the Touch Bar or the menu bar.
 - **Trash**: deleted to-dos wait 30 days under **Sampah** in the menu bar, so you can bring them back.
 - **Paper plane**: sends a to-do to a new Claude Code session (experimental).

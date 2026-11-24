@@ -7,6 +7,13 @@ struct Session: Decodable {
     var kind: String?, name: String?, status: String?
     var waitingFor: String?                  // with status "waiting": "permission prompt", "input needed", …
     var statusUpdatedAt: Double?             // milliseconds
+    var hostSessionId: String?               // the Claude app's own id ("local_…") for a session started there
+
+    /// Opens this session in the Claude app; nil for a session that runs in a terminal.
+    var appLink: URL? {
+        guard let id = hostSessionId, id.range(of: "^local_[A-Za-z0-9-]{1,64}$", options: .regularExpression) != nil else { return nil }
+        return URL(string: "claude://code/continue?session=\(id)")
+    }
 
     var working: Bool { status == "busy" }
     /// Stopped until you answer: a permission prompt, a question or a dialog.

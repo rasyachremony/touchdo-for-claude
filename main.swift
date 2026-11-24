@@ -300,55 +300,46 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         return image
     }
 
-    private weak var sessionsView: NSTextField?
-    private var sessionsWidth: NSLayoutConstraint?
+    // Sessions working right now, one chip each ("● name 6m"), in a row you can scroll; tap one to open it in the
+    // Claude app. Yellow ones wait for you.
+    private lazy var sessionScrubber = makeScrubber(width: 300)
+    private var sessions: [Session] = []
 
-    /// Sessions working right now, in two small lines and up to three columns: "● name 6m". Yellow ones wait for you.
     private func showSessions() {
-        guard let view = sessionsView else { return }
         let active = Session.active()
         // Room right of the limits: the app area is 685 pt, less gaps and edges (measured on the device).
         let room = max(90, 600 - (usageWidth?.constant ?? 210) - (planWidth?.constant ?? 50))
-        let columns = max(1, min(3, (active.count + 1) / 2)), cell = min(210, floor(room / CGFloat(columns)))
-        let nameFont = NSFont.systemFont(ofSize: 10, weight: .medium)
-        let lines = smallLines(tabs: (1..<3).map { cell * CGFloat($0) })
-        let text = NSMutableAttributedString()
-        func add(_ s: String, _ color: NSColor, _ font: NSFont) {
-            text.append(NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color, .paragraphStyle: lines]))
+        sessionScrubber.constraints.first { $0.firstAttribute == .width }?.constant = room
+        let changed = active.map(\.pid) != sessions.map(\.pid)
+        let texts = sessions.indices.map(sessionText)
+        sessions = active
+        if changed { sessionScrubber.reloadData() }        // keeps where you scrolled while the list stays the same
+        else if sessions.indices.map(sessionText) != texts { sessionScrubber.reloadItems(at: IndexSet(sessions.indices)) }
+    }
+
+    private func sessionText(_ index: Int) -> NSAttributedString {
+        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        guard sessions.indices.contains(index) else {
+            return NSAttributedString(string: "○ tidak ada sesi jalan", attributes: [.font: font, .foregroundColor: NSColor(white: 1, alpha: 0.35)])
         }
-        func width(_ s: String) -> CGFloat { ceil((s as NSString).size(withAttributes: [.font: nameFont]).width) }
-        if active.isEmpty { add("○ tidak ada sesi jalan", NSColor(white: 1, alpha: 0.35), nameFont) }
-        let shown = active.prefix(columns * 2), rows = min(2, shown.count)
-        for row in 0..<rows {
-            if row > 0 { add("\n", .clear, nameFont) }
-            for (column, index) in stride(from: row, to: shown.count, by: 2).enumerated() {
-                let session = shown[index]
-                if column > 0 { add("\t", .clear, nameFont) }
-                let minutes = max(0, Int(Date().timeIntervalSince1970 - (session.statusUpdatedAt ?? 0) / 1000) / 60)
-                var tail = session.statusUpdatedAt == nil ? "" : minutes < 60 ? " \(minutes)m" : " \(minutes / 60)j"
-                if session.needsYou { tail = session.waitingFor == "permission prompt" ? " izin" : " nunggu" }
-                if index == shown.count - 1, active.count > shown.count { tail += " +\(active.count - shown.count)" }
-                var name = session.name?.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespaces) ?? ""
-                if name.isEmpty { name = "Claude Code" }
-                while width("● " + name + tail) > cell - 8, name.count > 4 {   // shorten to its column
-                    name = String(name.dropLast(name.hasSuffix("…") ? 2 : 1)).trimmingCharacters(in: .whitespaces) + "…"
-                }
-                if session.needsYou {                  // asking permission or a question: yellow until you answer
-                    add("● ", .systemYellow, nameFont)
-                    add(name, .systemYellow, nameFont)
-                    add(tail, NSColor.systemYellow.withAlphaComponent(0.6), nameFont)
-                } else {
-                    add("● ", .systemGreen, nameFont)
-                    add(name, NSColor(white: 1, alpha: 0.85), nameFont)
-                    add(tail, NSColor(white: 1, alpha: 0.5), nameFont)
-                }
-            }
-        }
-        if !text.isEqual(to: view.attributedStringValue) {
-            view.attributedStringValue = text
-            // Exact, or macOS stretches the bar over the Control Strip.
-            sessionsWidth?.constant = active.isEmpty ? width("○ tidak ada sesi jalan") + 6 : cell * CGFloat(columns)
-        }
+        let session = sessions[index]
+        let minutes = max(0, Int(Date().timeIntervalSince1970 - (session.statusUpdatedAt ?? 0) / 1000) / 60)
+        var tail = session.statusUpdatedAt == nil ? "" : minutes < 60 ? " \(minutes)m" : " \(minutes / 60)j"
+        if session.needsYou { tail = session.waitingFor == "permission prompt" ? " izin" : " nunggu" }
+        var name = session.name?.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespaces) ?? ""
+        if name.isEmpty { name = "Claude Code" }
+        if name.count > 28 { name = String(name.prefix(27)).trimmingCharacters(in: .whitespaces) + "…" }
+        let main = session.needsYou ? NSColor.systemYellow : NSColor(white: 1, alpha: 0.9)
+        let text = NSMutableAttributedString(string: "● ", attributes: [.font: font, .foregroundColor: session.needsYou ? NSColor.systemYellow : NSColor.systemGreen])
+        text.append(NSAttributedString(string: name, attributes: [.font: font, .foregroundColor: main]))
+        text.append(NSAttributedString(string: tail, attributes: [.font: font, .foregroundColor: main.withAlphaComponent(0.6)]))
+        return text
+    }
+
+    private func openSession(_ index: Int) {
+        sessionScrubber.selectedIndex = -1          // so tapping the same chip again opens it again
+        guard sessions.indices.contains(index), let link = sessions[index].appLink else { return NSSound.beep() }
+        NSWorkspace.shared.open(link)
     }
 
     private func showUsage() {
@@ -638,12 +629,8 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
             planView = view
             return viewItem(id, view)
         case .sessions:                        // Claude Code sessions at work, right of the limits
-            let view = twoLineLabel()
-            sessionsWidth = view.widthAnchor.constraint(equalToConstant: 1)
-            sessionsWidth?.isActive = true
-            sessionsView = view
             showSessions()
-            return viewItem(id, view)
+            return viewItem(id, sessionScrubber)
         case .noEscape:
             let blank = NSView()
             blank.widthAnchor.constraint(equalToConstant: 1).isActive = true
@@ -894,7 +881,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
     }
 
     func numberOfItems(for scrubber: NSScrubber) -> Int {
-        scrubber === dateScrubber ? dateChoices().count : max(todos.count, 1)
+        scrubber === dateScrubber ? dateChoices().count : scrubber === sessionScrubber ? max(sessions.count, 1) : max(todos.count, 1)
     }
 
     func scrubber(_ scrubber: NSScrubber, viewForItemAt index: Int) -> NSScrubberItemView {
@@ -902,6 +889,10 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         if scrubber === dateScrubber {
             chip.textField.attributedStringValue = NSAttributedString(string: dueLabel(dateChoices()[index]), attributes: [.font: font])
             chip.layer?.backgroundColor = NSColor(white: 1, alpha: 0.14).cgColor
+        } else if scrubber === sessionScrubber {
+            chip.textField.attributedStringValue = sessionText(index)
+            let waiting = sessions.indices.contains(index) && sessions[index].needsYou
+            chip.layer?.backgroundColor = (waiting ? NSColor.systemYellow.withAlphaComponent(0.25) : NSColor(white: 1, alpha: sessions.isEmpty ? 0 : 0.1)).cgColor
         } else {
             chip.textField.attributedStringValue = chipText(index)
             let tint = todos.indices.contains(index) ? urgency(todos[index]) : nil
@@ -912,11 +903,13 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
 
     func scrubber(_ scrubber: NSScrubber, layout: NSScrubberFlowLayout, sizeForItemAt index: Int) -> NSSize {
         if scrubber === dateScrubber { return NSSize(width: 92, height: 30) }
+        if scrubber === sessionScrubber { return NSSize(width: sessionText(index).size().width + 22, height: 30) }
         return NSSize(width: min(chipText(index).size().width + 28, 300), height: 30)
     }
 
     func scrubber(_ scrubber: NSScrubber, didSelectItemAt index: Int) {
         if scrubber === dateScrubber { return setDue(dateChoices()[index]) }
+        if scrubber === sessionScrubber { return openSession(index) }
         guard todos.indices.contains(index) else { return addTodo() }   // the empty-list hint opens typing
         selected = index
         openItem()
