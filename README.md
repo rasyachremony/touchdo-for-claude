@@ -11,15 +11,18 @@ No more switching windows to see how much of your Claude plan is left. It's just
 
 ## What you get
 
-- **Your limits**: 5-hour and weekly use, with reset times. Green, yellow from 50%, red from 80%.
+- **Your limits**: 5-hour and weekly use, plus the weekly Fable limit when your plan has one, with reset times.
+  Green, yellow from 50%, red from 80%. They refresh every minute.
+- **Token total**: a small line under your plan with every token Claude Code has used on this Mac, like "10.2B token".
 - **Your sessions**: the Claude Code sessions working right now, and for how long. One that's waiting for your
   permission or answer turns **yellow** and moves to the front.
 - **To-dos**: add, tick and set deadlines from the Touch Bar or the menu bar.
+- **Trash**: deleted to-dos wait 30 days under **Sampah** in the menu bar, so you can bring them back.
 - **Paper plane**: sends a to-do to a new Claude Code session (experimental).
 - **Mic**: hold to talk to Claude, double tap to keep it on.
 - **☕**: keeps your Mac awake. Uses [Insomnia](https://github.com/krishhgg/Insomnia) if you have it.
 
-Start typing and it gets out of the way, so you still get typing suggestions. A second after you stop, it's back.
+Start typing and it gets out of the way, so you still get typing suggestions. Two seconds after you stop, it's back.
 The buttons are in Indonesian.
 
 ## Install
@@ -42,18 +45,20 @@ Then:
 That's it. It starts by itself every time you log in.
 
 **Optional:** paste [statusline-usage.sh](statusline-usage.sh) into your
-[Claude Code status line script](https://code.claude.com/docs/en/statusline) so the limits update after every reply.
+[Claude Code status line script](https://code.claude.com/docs/en/statusline) so the limits update after every reply
+instead of every minute.
 
 ## Things you should know
 
-- **It uses a bit of your plan.** If the limits haven't updated in five minutes, TouchDo asks Claude Code with one tiny
-  Haiku request (about 1,100 tokens). That can add up over a day, and it can start a new 5-hour window. The optional
-  step above makes it run much less. To turn it off, set `autoRefresh` in `main.swift` to `.infinity` and run
-  `./build.sh` again.
+- **The limits cost no tokens.** Every minute TouchDo runs Claude Code's own `/usage` command, which asks Anthropic for
+  your limits without running a model. To change how often, set `autoRefresh` in `main.swift` and run `./build.sh`
+  again.
+- **The token total** comes from Claude Code's files in `~/.claude`. The first count after a start reads all your
+  transcripts and can take half a minute; after that it only reads what's new.
 - **The paper plane starts a real session**, in whatever folder and permission mode Claude has selected, with any files
   still attached there. If it can't confirm the send, it beeps and leaves the text for you.
-- **Your data stays on your Mac.** Apart from that tiny request, TouchDo sends nothing anywhere. It reads Claude Code's
-  own files for your sessions and plan, and only reads what you type while you're typing a to-do.
+- **Your data stays on your Mac.** Apart from the `/usage` check, TouchDo sends nothing anywhere. It reads Claude
+  Code's own files for your sessions, plan and token total, and only reads what you type while you're typing a to-do.
 - **The build is signed ad hoc**, so Accessibility is tied to the app's id. Another app signed with the same id would get
   it too. To avoid that, sign with your own certificate and drop the `-r=...` part of the `codesign` line in `build.sh`.
 - **It uses private Apple APIs**, so a macOS update can break it. Tested on macOS 27.
@@ -62,7 +67,7 @@ That's it. It starts by itself every time you log in.
 ## Problems?
 
 - **Nothing on the left:** check the Accessibility switch. If it's on, remove TouchDo with **−** and add it again.
-- **Limits show "–":** sign in to Claude Code and wait five minutes.
+- **Limits show "–":** sign in to Claude Code and wait a minute.
 - **Mic does nothing:** open Claude, wait a few seconds, and check the shortcut.
 
 ## Uninstall

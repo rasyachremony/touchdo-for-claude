@@ -50,6 +50,8 @@ extension NSTouchBarItem.Identifier {
 }
 
 struct Todo: Codable, Equatable { var text: String; var done = false; var due: Date? = nil }
+/// A deleted to-do, kept 30 days in trash.json so the menu bar can bring it back.
+struct Trashed: Codable { var todo: Todo; var deleted: Date }
 
 /// Rounded "chip" for one to-do or one date in a scrubber.
 final class Chip: NSScrubberTextItemView {
@@ -145,11 +147,14 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         return dir.appendingPathComponent("todos.json")
     }()
     /// Claude plan limits, written by the Claude Code status line script (see usageURL).
-    private struct Limit: Decodable { var used_percentage: Double?; var resets_at: Double? }
-    private struct Usage: Decodable { var five_hour: Limit?; var seven_day: Limit? }
+    private struct Limit: Decodable { var used_percentage: Double?; var resets_at: Double?; var name: String? }
+    /// seven_day_model: a weekly limit of one model (Fable), from `claude -p /usage`.
+    private struct Usage: Decodable { var five_hour: Limit?; var seven_day: Limit?; var seven_day_model: Limit? }
     private var usage = Usage()
     private var usageStamp: Date?
     private lazy var usageURL = todoURL.deletingLastPathComponent().appendingPathComponent("usage.json")
+    private var trash: [Trashed] = []
+    private lazy var trashURL = todoURL.deletingLastPathComponent().appendingPathComponent("trash.json")
     private var awakeActivity: NSObjectProtocol?
     private var awakeUntil: Date?            // nil while awake means "until switched off"
     private var awakeMinutes: Int?           // the chosen option, to highlight it
@@ -237,6 +242,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
             exit(0)
         }
         loadTodos()
+        loadTrash()
         restoreAwake()
         classCall(NSTouchBarItem.self, "addSystemTrayItem:", trayItem)
         showStripButton()
@@ -279,7 +285,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         let logo = NSWorkspace.shared.urlForApplication(withBundleIdentifier: claudeID).map { NSWorkspace.shared.icon(forFile: $0.path) }
         let font = NSFont.systemFont(ofSize: 10, weight: .semibold)
         func attributes(_ i: Int) -> [NSAttributedString.Key: Any] { [.font: font, .foregroundColor: i == 0 ? claudeColor : NSColor(white: 1, alpha: 0.6)] }
-        let lines = planLines, textWidth = lines.enumerated().map { ceil(($1 as NSString).size(withAttributes: attributes($0)).width) }.max() ?? 0
+        let lines = (planLines.isEmpty ? [] : [planLines.joined(separator: " ")]) + [tokenLine].compactMap { $0 }, textWidth = lines.enumerated().map { ceil(($1 as NSString).size(withAttributes: attributes($0)).width) }.max() ?? 0
         let side: CGFloat = logo == nil ? 0 : 20, gap: CGFloat = side > 0 && textWidth > 0 ? 5 : 0
         let image = NSImage(size: NSSize(width: max(1, side + gap + textWidth), height: 28), flipped: false) { rect in
             logo?.draw(in: NSRect(x: 0, y: (rect.height - side) / 2, width: side, height: side))
@@ -351,63 +357,61 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         usageWidth?.constant = ceil(view.attributedStringValue.size().width) + 4
     }
 
-    // Automatic refresh: when no Claude Code session has updated usage.json for `autoRefresh` seconds, run a tiny
-    // headless Claude Code request (Haiku, no tools, no MCP, no hooks, not saved) and keep the limits it reports.
-    // Each run costs about 1,100 input tokens of your plan. `rate_limit_event` is Claude Code's stream-json output,
-    // not a documented API; if it ever changes, the bars just keep their last numbers.
-    private let autoRefresh: TimeInterval = 300
+    // Every `autoRefresh` seconds: the limits from `claude -p /usage` (Claude Code's own /usage command; it asks
+    // Anthropic for your limits and runs no model, so it costs no tokens), then the token total from Claude Code's files.
+    private let autoRefresh: TimeInterval = 60
     private var refreshing = false, lastRefresh = Date.distantPast
+    private let tokenTotal = TokenTotal()      // only touched by the one refresh running at a time
+    private var tokenLine: String?
 
     private func refreshUsageIfStale() {
-        let age = usageStamp.map { Date().timeIntervalSince($0) } ?? .infinity
-        guard !planLines.isEmpty,   // no plan (API key or signed out): no limits to fetch, and each run would be billed
-              !refreshing, age >= autoRefresh, Date().timeIntervalSince(lastRefresh) >= autoRefresh,
-              let claude = ["~/.local/bin/claude", "~/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
-                .map({ NSString(string: $0).expandingTildeInPath }).first(where: FileManager.default.isExecutableFile) else { return }
+        guard !refreshing, Date().timeIntervalSince(lastRefresh) >= autoRefresh else { return }
         refreshing = true
         lastRefresh = Date()
-        let url = usageURL
+        // No plan (API key or signed out): no limits to fetch.
+        let claude = planLines.isEmpty ? nil : ["~/.local/bin/claude", "~/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
+            .map({ NSString(string: $0).expandingTildeInPath }).first(where: FileManager.default.isExecutableFile)
+        let url = usageURL, tokens = tokenTotal
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let run = Process()
-            run.executableURL = URL(fileURLWithPath: claude)
-            run.arguments = ["-p", "ok", "--model", "haiku", "--output-format", "stream-json", "--verbose", "--max-turns", "1",
-                             "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
-                             "--setting-sources", "", "--system-prompt", "Reply with ok."]
-            // launchd's PATH has no Homebrew or npm folders; an npm-installed claude needs to find node.
-            var environment = ProcessInfo.processInfo.environment
-            environment["PATH"] = "\((claude as NSString).deletingLastPathComponent):/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
-            run.environment = environment
-            run.currentDirectoryURL = FileManager.default.temporaryDirectory
-            let out = Pipe()
-            run.standardOutput = out
-            run.standardError = FileHandle.nullDevice
-            run.standardInput = FileHandle.nullDevice
-            var windows: [String: Any]?
-            if (try? run.run()) != nil {
-                let killer = DispatchWorkItem { if run.isRunning { run.terminate() } }
-                DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: killer)
-                let data = out.fileHandleForReading.readDataToEndOfFile()
-                run.waitUntilExit()
-                killer.cancel()
-                for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
-                    guard let event = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-                          event["type"] as? String == "rate_limit_event",
-                          let info = event["rate_limit_info"] as? [String: Any],
-                          let found = info["unifiedWindows"] as? [String: Any] else { continue }
-                    windows = found
+            if let claude {
+                let run = Process()
+                run.executableURL = URL(fileURLWithPath: claude)
+                run.arguments = ["-p", "/usage", "--strict-mcp-config", "--no-session-persistence", "--setting-sources", ""]
+                // launchd's PATH has no Homebrew or npm folders; an npm-installed claude needs to find node.
+                var environment = ProcessInfo.processInfo.environment
+                environment["PATH"] = "\((claude as NSString).deletingLastPathComponent):/opt/homebrew/bin:/usr/local/bin:" + (environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin")
+                run.environment = environment
+                run.currentDirectoryURL = FileManager.default.temporaryDirectory
+                let out = Pipe()
+                run.standardOutput = out
+                run.standardError = FileHandle.nullDevice
+                run.standardInput = FileHandle.nullDevice
+                if (try? run.run()) != nil {
+                    let killer = DispatchWorkItem { if run.isRunning { run.terminate() } }
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: killer)
+                    let data = out.fileHandleForReading.readDataToEndOfFile()
+                    run.waitUntilExit()
+                    killer.cancel()
+                    let usage = ClaudeUsage.parse(String(decoding: data, as: UTF8.self))
+                    if !usage.isEmpty, let json = try? JSONSerialization.data(withJSONObject: usage) {
+                        let temp = url.appendingPathExtension("auto")
+                        if (try? json.write(to: temp)) != nil { rename(temp.path, url.path) }   // atomic, like the status line's mv
+                    }
                 }
             }
-            // Same shape the status line writes: used_percentage 0-100 and resets_at in epoch seconds.
-            var usage: [String: Any] = [:]
-            for key in ["five_hour", "seven_day"] {
-                guard let w = windows?[key] as? [String: Any], let used = w["utilization"] as? Double else { continue }
-                usage[key] = ["used_percentage": used * 100, "resets_at": w["resetsAt"] as Any]
+            let total = tokens.update()            // the first read of all transcripts takes a while; later ones are quick
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.refreshing = false
+                let line = total > 0 ? TokenTotal.label(total) : nil
+                if line != self.tokenLine {
+                    self.tokenLine = line
+                    let image = self.planImage()
+                    self.planView?.image = image
+                    self.planWidth?.constant = image.size.width
+                }
+                self.readUsage()
             }
-            if !usage.isEmpty, let json = try? JSONSerialization.data(withJSONObject: usage) {
-                let temp = url.appendingPathExtension("auto")
-                if (try? json.write(to: temp)) != nil { rename(temp.path, url.path) }   // atomic, like the status line's mv
-            }
-            DispatchQueue.main.async { self?.refreshing = false; self?.readUsage() }
         }
     }
 
@@ -522,25 +526,32 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         return logo
     }
 
-    /// Two small lines of ASCII bars, coloured part = used (green / yellow / red), then percent and reset time:
-    /// 5h   ██░░░░░░░░  19% ↻04:10
-    /// Week ██░░░░░░░░  16% ↻Sab 13:00
+    /// Small lines of ASCII bars, coloured part = used (green / yellow / red), then percent and reset time;
+    /// a third one for a model's own weekly limit when Claude Code reports one:
+    /// 5h    ██░░░░░░░░  19% ↻04:10
+    /// Week  ██░░░░░░░░  16% ↻Sab 13:00
+    /// Fable █░░░░░░░░░   8% ↻Sab 13:00
     private func usageText() -> NSAttributedString {
         let dim = NSColor(white: 1, alpha: 0.22), label = NSColor(white: 1, alpha: 0.7)
+        var rows = [("5h", usage.five_hour, false), ("Week", usage.seven_day, true)]
+        if let model = usage.seven_day_model { rows.append((String((model.name ?? "Model").prefix(5)), model, true)) }
+        let font = rows.count > 2 ? NSFont.monospacedSystemFont(ofSize: 8, weight: .semibold) : smallFont
+        let lines = smallLines(height: rows.count > 2 ? 10 : 14)
         let text = NSMutableAttributedString()
         func add(_ s: String, _ color: NSColor) {
-            text.append(NSAttributedString(string: s, attributes: [.font: smallFont, .foregroundColor: color, .paragraphStyle: smallLines()]))
+            text.append(NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color, .paragraphStyle: lines]))
         }
-        for (i, (name, limit)) in [("5h  ", usage.five_hour), ("Week", usage.seven_day)].enumerated() {
+        let nameWidth = rows.map(\.0.count).max() ?? 4
+        for (i, (name, limit, weekday)) in rows.enumerated() {
             let p = percent(limit), cells = 10
             let filled = p.map { $0 > 0 ? max(1, min(cells, Int(($0 / 10).rounded()))) : 0 } ?? 0   // any use shows a block
             let color = p.map(limitColor) ?? dim
-            add((i > 0 ? "\n" : "") + name + " ", label)
+            add((i > 0 ? "\n" : "") + name.padding(toLength: nameWidth, withPad: " ", startingAt: 0) + " ", label)
             add(String(repeating: "█", count: filled), color)
             add(String(repeating: "░", count: cells - filled), p == nil ? dim : color.withAlphaComponent(0.35))
             add(p.map { String(format: " %3d%%", Int($0)) } ?? "    –", p == nil ? dim : color)
             if let reset = limit?.resets_at.map({ Date(timeIntervalSince1970: $0) }), reset > Date() {
-                add(" ↻" + resetLabel(reset, weekday: i == 1), label.withAlphaComponent(0.5))
+                add(" ↻" + resetLabel(reset, weekday: weekday), label.withAlphaComponent(0.5))
             }
         }
         return text
@@ -548,10 +559,10 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
 
     private let smallFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
 
-    private func smallLines(tabs: [CGFloat] = []) -> NSParagraphStyle {
+    private func smallLines(height: CGFloat = 14, tabs: [CGFloat] = []) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
-        style.maximumLineHeight = 14             // two lines in the 30 pt Touch Bar
-        style.minimumLineHeight = 14
+        style.maximumLineHeight = height         // 14: two lines in the 30 pt Touch Bar, 10: three
+        style.minimumLineHeight = height
         style.lineBreakMode = .byClipping
         style.tabStops = tabs.map { NSTextTab(textAlignment: .left, location: $0) }
         return style
@@ -614,6 +625,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
             return item
         case .usage:                           // 5-hour and weekly Claude limits, updated live from usage.json
             let view = twoLineLabel()
+            view.maximumNumberOfLines = 3
             view.attributedStringValue = usageText()
             usageWidth = view.widthAnchor.constraint(equalToConstant: ceil(view.attributedStringValue.size().width) + 4)
             usageWidth?.isActive = true
@@ -706,7 +718,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
     // It covers the app's own Touch Bar, so it steps aside on any keypress (typing suggestions come back) and
     // returns after `restingDelay` seconds without typing.
 
-    private let restingDelay: TimeInterval = 1      // shorter hides typing suggestions while you pause to tap one
+    private let restingDelay: TimeInterval = 2      // shorter hides typing suggestions while you pause to tap one
     private var restingShown = false, lastTyped = Date.distantPast
     private var restingGone = 0              // half-second ticks the shown bar has been off screen
     private var keyWatch: CFMachPort?
@@ -930,7 +942,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
 
     @objc private func deleteSelected() {
         guard todos.indices.contains(selected) else { return openHome() }
-        todos.remove(at: selected)
+        moveToTrash([todos.remove(at: selected)])
         todosChanged()
         openHome()
     }
@@ -983,8 +995,46 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
     }
 
     @objc private func clearDone() {
+        moveToTrash(todos.filter(\.done))
         todos.removeAll { $0.done }
         todosChanged()
+    }
+
+    // MARK: Trash: deleted to-dos stay 30 days, to bring back from the menu bar
+
+    private func loadTrash() {
+        trash = (try? JSONDecoder().decode([Trashed].self, from: Data(contentsOf: trashURL))) ?? []
+    }
+
+    private func moveToTrash(_ removed: [Todo]) {
+        trash.insert(contentsOf: removed.map { Trashed(todo: $0, deleted: Date()) }, at: 0)
+        saveTrash()
+    }
+
+    private func saveTrash() {
+        trash.removeAll { $0.deleted < Date().addingTimeInterval(-30 * 86_400) }
+        do { try JSONEncoder().encode(trash).write(to: trashURL, options: .atomic) }
+        catch { NSLog("TouchDo: could not save the trash: \(error)") }
+    }
+
+    @objc private func restoreTrashed(_ sender: NSMenuItem) {
+        guard trash.indices.contains(sender.tag) else { return }
+        todos.append(trash.remove(at: sender.tag).todo)
+        saveTrash()
+        todosChanged()
+    }
+
+    @objc private func emptyTrash() {
+        hideResting()
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Kosongkan sampah?"
+        alert.informativeText = "\(trash.count) to-do dihapus permanen dan nggak bisa dipulihkan."
+        alert.addButton(withTitle: "Kosongkan")
+        alert.addButton(withTitle: "Batal")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        trash = []
+        saveTrash()
     }
 
     // MARK: Typing a to-do on the Touch Bar
@@ -1207,7 +1257,10 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         if shownBar === itemBar || shownBar === dateBar { dismissShownBar() }
         menu.removeAllItems()
         let open = todos.filter { !$0.done }.count
-        for (name, limit, weekday) in [("Limit 5 jam", usage.five_hour, false), ("Limit mingguan", usage.seven_day, true)] {
+        var limits = [("Limit 5 jam", usage.five_hour, false), ("Limit mingguan", usage.seven_day, true)]
+        if let model = usage.seven_day_model { limits.append(("Limit mingguan \(model.name ?? "model")", model, true)) }
+        if let tokenLine { menu.addItem(withTitle: "Total \(tokenLine) di Mac ini", action: nil, keyEquivalent: "") }
+        for (name, limit, weekday) in limits {
             let item = NSMenuItem(title: limitLine(name, limit, weekday: weekday), action: nil, keyEquivalent: "")
             item.image = dot(percent(limit).map(limitColor) ?? .systemGray)
             menu.addItem(item)
@@ -1229,6 +1282,18 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         if !todos.isEmpty { menu.addItem(.separator()) }
         menu.addItem(menuItem("Tambah to-do…", #selector(menuAdd), 0, key: "n"))
         if todos.contains(where: { $0.done }) { menu.addItem(menuItem("Hapus yang selesai", #selector(clearDone), 0)) }
+        saveTrash()                                // drops what is past 30 days
+        if !trash.isEmpty {
+            let item = NSMenuItem(title: "Sampah (\(trash.count))", action: nil, keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+            let inside = NSMenu()
+            inside.addItem(withTitle: "Klik buat pulihkan", action: nil, keyEquivalent: "")
+            for (index, gone) in trash.prefix(30).enumerated() { inside.addItem(menuItem(gone.todo.text, #selector(restoreTrashed(_:)), index)) }
+            inside.addItem(.separator())
+            inside.addItem(menuItem("Kosongkan sampah…", #selector(emptyTrash), 0))
+            item.submenu = inside
+            menu.addItem(item)
+        }
         menu.addItem(.separator())
         menu.addItem(menuItem("Keluar TouchDo", #selector(quit), 0, key: "q"))
     }
@@ -1256,7 +1321,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
 
     @objc private func menuDelete(_ sender: NSMenuItem) {
         guard todos.indices.contains(sender.tag) else { return }
-        todos.remove(at: sender.tag)
+        moveToTrash([todos.remove(at: sender.tag)])
         todosChanged()
     }
 

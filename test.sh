@@ -3,5 +3,5 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p build
-swiftc -parse-as-library Draft.swift ClaudeChat.swift Sessions.swift Plan.swift test_draft.swift -o build/selfcheck
+swiftc -parse-as-library Draft.swift ClaudeChat.swift Sessions.swift Plan.swift Limits.swift test_draft.swift -o build/selfcheck
 build/selfcheck

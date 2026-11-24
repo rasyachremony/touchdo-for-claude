@@ -11,15 +11,18 @@ Nggak perlu bolak-balik buka jendela cuma buat ngecek sisa limit Claude. Semuany
 
 ## Isinya
 
-- **Limit**: pemakaian 5 jam dan mingguan, plus kapan reset. Hijau, kuning mulai 50%, merah mulai 80%.
+- **Limit**: pemakaian 5 jam dan mingguan, plus limit mingguan Fable kalau plan kamu punya, dan kapan reset.
+  Hijau, kuning mulai 50%, merah mulai 80%. Ke-update tiap menit.
+- **Total token**: tulisan kecil di bawah plan, semua token yang sudah dipakai Claude Code di Mac ini, misalnya "10.2B token".
 - **Sesi**: sesi Claude Code yang lagi kerja, dan sudah berapa lama. Sesi yang nunggu izin atau jawaban kamu jadi
   **kuning** dan pindah ke depan.
 - **To-do**: tambah, centang, kasih deadline dari Touch Bar atau menu bar.
+- **Sampah**: to-do yang dihapus disimpan 30 hari di menu **Sampah** di menu bar, jadi bisa dipulihkan.
 - **Pesawat kertas**: kirim to-do ke sesi Claude Code baru (masih eksperimen).
 - **Mic**: tahan buat ngomong ke Claude, ketuk dua kali biar tetap nyala.
 - **☕**: bikin Mac tetap nyala. Pakai [Insomnia](https://github.com/krishhgg/Insomnia) kalau ada.
 
-Begitu kamu mulai ngetik, dia minggir dulu biar saran ketik tetap muncul. Sedetik setelah berhenti, dia balik lagi.
+Begitu kamu mulai ngetik, dia minggir dulu biar saran ketik tetap muncul. Dua detik setelah berhenti, dia balik lagi.
 
 ## Cara pasang
 
@@ -41,18 +44,20 @@ Habis itu:
 Selesai. Tiap login dia nyala sendiri.
 
 **Opsional:** tempel [statusline-usage.sh](statusline-usage.sh) ke
-[script status line Claude Code](https://code.claude.com/docs/en/statusline) biar limitnya ke-update tiap balasan.
+[script status line Claude Code](https://code.claude.com/docs/en/statusline) biar limitnya ke-update tiap balasan, bukan
+cuma tiap menit.
 
 ## Yang perlu kamu tahu
 
-- **Pakai sedikit kuota plan kamu.** Kalau limit belum ke-update lima menit, TouchDo nanya Claude Code lewat satu
-  permintaan kecil ke Haiku (sekitar 1.100 token). Kalau seharian lumayan juga, dan bisa memulai jendela 5 jam baru.
-  Langkah opsional di atas bikin ini jauh lebih jarang. Buat matiin, ubah `autoRefresh` di `main.swift` jadi
-  `.infinity` lalu jalankan `./build.sh` lagi.
+- **Cek limit nggak makan token.** Tiap menit TouchDo menjalankan perintah `/usage` milik Claude Code, yang nanya
+  limit kamu ke Anthropic tanpa menjalankan model. Buat ganti jedanya, ubah `autoRefresh` di `main.swift` lalu
+  jalankan `./build.sh` lagi.
+- **Total token** dihitung dari file Claude Code di `~/.claude`. Hitungan pertama setelah nyala membaca semua
+  transkrip dan bisa sampai setengah menit; habis itu cuma baca yang baru.
 - **Pesawat kertas beneran memulai sesi**, di folder dan mode izin yang lagi kepilih di Claude, termasuk file yang
   masih terlampir. Kalau pengirimannya nggak bisa dipastikan, dia bunyi dan teksnya dibiarkan buat kamu.
-- **Data kamu tetap di Mac.** Selain permintaan kecil tadi, TouchDo nggak mengirim apa-apa. Dia cuma baca file Claude
-  Code buat sesi dan plan, dan cuma baca ketikan waktu kamu lagi ngetik to-do.
+- **Data kamu tetap di Mac.** Selain cek `/usage` tadi, TouchDo nggak mengirim apa-apa. Dia cuma baca file Claude
+  Code buat sesi, plan dan total token, dan cuma baca ketikan waktu kamu lagi ngetik to-do.
 - **Build-nya ditandatangani ad hoc**, jadi izin Accessibility terikat ke id aplikasinya. Aplikasi lain dengan id yang
   sama juga bakal dapat izin itu. Biar aman, tanda tangani pakai sertifikat sendiri dan hapus bagian `-r=...` di baris
   `codesign` di `build.sh`.
@@ -62,7 +67,7 @@ Selesai. Tiap login dia nyala sendiri.
 ## Ada masalah?
 
 - **Bagian kiri kosong:** cek tombol Accessibility. Kalau sudah nyala, hapus TouchDo pakai **−** lalu tambah lagi.
-- **Limit cuma "–":** login dulu di Claude Code, tunggu lima menit.
+- **Limit cuma "–":** login dulu di Claude Code, tunggu semenit.
 - **Mic diam aja:** buka Claude, tunggu sebentar, cek shortcut-nya.
 
 ## Hapus

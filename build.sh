@@ -26,7 +26,7 @@ fi
 APP="build/TouchDo.app"
 rm -rf build
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-swiftc -O -swift-version 5 main.swift Draft.swift ClaudeChat.swift Sessions.swift Plan.swift -o "$APP/Contents/MacOS/TouchDo"
+swiftc -O -swift-version 5 main.swift Draft.swift ClaudeChat.swift Sessions.swift Plan.swift Limits.swift -o "$APP/Contents/MacOS/TouchDo"
 sed "s/__BUNDLE_ID__/$ID/" Info.plist > "$APP/Contents/Info.plist"
 swift icon.swift build/AppIcon.iconset
 iconutil -c icns build/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
