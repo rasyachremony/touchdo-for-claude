@@ -20,7 +20,7 @@ No more switching windows to see how much of your Claude plan is left. It's just
 - **To-dos**: add, tick and set deadlines from the Touch Bar or the menu bar.
 - **Trash**: deleted to-dos wait 30 days under **Sampah** in the menu bar, so you can bring them back.
 - **Paper plane**: sends a to-do to a new Claude Code session (experimental).
-- **Mic**: hold to talk to Claude, double tap to keep it on.
+- **Mic**: right next to your plan; hold to talk to Claude, double tap to keep it on.
 - **☕**: keeps your Mac awake. Uses [Insomnia](https://github.com/krishhgg/Insomnia) if you have it.
 
 Start typing and it gets out of the way, so you still get typing suggestions. Two seconds after you stop, it's back.

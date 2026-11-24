@@ -19,7 +19,7 @@ Nggak perlu bolak-balik buka jendela cuma buat ngecek sisa limit Claude. Semuany
 - **To-do**: tambah, centang, kasih deadline dari Touch Bar atau menu bar.
 - **Sampah**: to-do yang dihapus disimpan 30 hari di menu **Sampah** di menu bar, jadi bisa dipulihkan.
 - **Pesawat kertas**: kirim to-do ke sesi Claude Code baru (masih eksperimen).
-- **Mic**: tahan buat ngomong ke Claude, ketuk dua kali biar tetap nyala.
+- **Mic**: persis di sebelah plan; tahan buat ngomong ke Claude, ketuk dua kali biar tetap nyala.
 - **☕**: bikin Mac tetap nyala. Pakai [Insomnia](https://github.com/krishhgg/Insomnia) kalau ada.
 
 Begitu kamu mulai ngetik, dia minggir dulu biar saran ketik tetap muncul. Dua detik setelah berhenti, dia balik lagi.

@@ -43,7 +43,7 @@ extension NSTouchBarItem.Identifier {
     static let awakeTitle = NSTouchBarItem.Identifier("tbk.awake.title"), awakeOff = NSTouchBarItem.Identifier("tbk.awake.off")
     static let quit = NSTouchBarItem.Identifier("tbk.quit"), usage = NSTouchBarItem.Identifier("tbk.usage")
     static let sessions = NSTouchBarItem.Identifier("tbk.sessions"), plan = NSTouchBarItem.Identifier("tbk.plan")
-    static let noEscape = NSTouchBarItem.Identifier("tbk.noEscape")
+    static let noEscape = NSTouchBarItem.Identifier("tbk.noEscape"), restingMic = NSTouchBarItem.Identifier("tbk.restingMic")
     /// Not a real Control Strip button: presenting the rings under it keeps our logo button visible.
     static let restingTray = NSTouchBarItem.Identifier("io.github.rasyachremony.TouchDo.resting")
     static func awakeFor(_ minutes: Int) -> NSTouchBarItem.Identifier { .init("tbk.awake.\(minutes)") }
@@ -73,8 +73,8 @@ final class HoldView: NSView {
     private let idle = NSColor(white: 1, alpha: 0.16).cgColor, red = NSColor.systemRed.withAlphaComponent(0.75).cgColor
     private var fingers = 0, holding = false, lastTap = Date.distantPast
     private var holdTimer: DispatchWorkItem?
-    init(image: NSImage) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 64, height: 30))
+    init(image: NSImage, width: CGFloat = 64) {
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 30))
         allowedTouchTypes = [.direct]
         wantsLayer = true
         layer?.cornerRadius = 6
@@ -83,7 +83,7 @@ final class HoldView: NSView {
         imageView.frame = bounds
         imageView.autoresizingMask = [.width, .height]
         addSubview(imageView)
-        widthAnchor.constraint(equalToConstant: 64).isActive = true
+        widthAnchor.constraint(equalToConstant: width).isActive = true
         setAccessibilityLabel("Tahan buat ngomong ke Claude, ketuk dua kali biar tetap nyala")
     }
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -162,7 +162,8 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
     private var ticker: Timer?, barWatch: Timer?
     private var stripPID = App.controlStripPID()
     private var talking = false
-    private weak var micView: HoldView?
+    private weak var micView: HoldView?, restingMicView: HoldView?   // home bar, and next to the plan at rest
+    private func micLatched(_ on: Bool) { micView?.latched = on; restingMicView?.latched = on }
     private weak var awakeButton: NSButton?, itemDoneButton: NSButton?
     private var choiceButtons: [Int: NSButton] = [:]
 
@@ -186,7 +187,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
     private lazy var homeBar = bar([.mic, .awake, .count, .add, .list])
     /// Shown at the far left whenever no other bar is up and you aren't typing: the live 5h / weekly rings.
     private lazy var restingBar: NSTouchBar = {
-        let b = bar([.plan, .usage, .sessions, .flexibleSpace])
+        let b = bar([.plan, .restingMic, .usage, .sessions, .flexibleSpace])
         b.escapeKeyReplacementItemIdentifier = .noEscape   // an empty item where the ✕ would go
         return b
     }()
@@ -310,7 +311,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         var active = Session.active()
         if let i = active.firstIndex(where: { $0.pid == openedSession }) { active.insert(active.remove(at: i), at: 0) }
         // Room right of the limits: the app area is 685 pt, less gaps and edges (measured on the device).
-        let room = max(90, 600 - (usageWidth?.constant ?? 210) - (planWidth?.constant ?? 50))
+        let room = max(90, 600 - (usageWidth?.constant ?? 170) - (planWidth?.constant ?? 50) - 52)   // 52: the mic and its gap
         sessionScrubber.constraints.first { $0.firstAttribute == .width }?.constant = room
         let changed = active.map(\.pid) != sessions.map(\.pid)
         let texts = sessions.indices.map(sessionText)
@@ -522,46 +523,50 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         return logo
     }
 
-    /// Small lines of ASCII bars, coloured part = used (green / yellow / red), then percent and reset time;
-    /// a third one for a model's own weekly limit when Claude Code reports one:
-    /// 5h    ██░░░░░░░░  19% ↻04:10
-    /// Week  ██░░░░░░░░  16% ↻Sab 13:00
-    /// Fable █░░░░░░░░░   8% ↻Sab 13:00
+    /// One column per limit: its name and reset small on top, the percent big below, coloured green / yellow / red.
+    /// 5h ↻00:20   Week ↻Sab   Fable ↻Sab
+    /// 20%         53%         27%
+    /// Exact reset times are in the menu bar.
     private func usageText() -> NSAttributedString {
-        let dim = NSColor(white: 1, alpha: 0.22), label = NSColor(white: 1, alpha: 0.7)
-        var rows = [("5h", usage.five_hour, false), ("Week", usage.seven_day, true)]
-        if let model = usage.seven_day_model { rows.append((String((model.name ?? "Model").prefix(5)), model, true)) }
-        let font = rows.count > 2 ? NSFont.monospacedSystemFont(ofSize: 8, weight: .semibold) : smallFont
-        let lines = smallLines(height: rows.count > 2 ? 10 : 14)
-        let text = NSMutableAttributedString()
-        func add(_ s: String, _ color: NSColor) {
-            text.append(NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color, .paragraphStyle: lines]))
-        }
-        let nameWidth = rows.map(\.0.count).max() ?? 4
-        for (i, (name, limit, weekday)) in rows.enumerated() {
-            let p = percent(limit), cells = 10
-            let filled = p.map { $0 > 0 ? max(1, min(cells, Int(($0 / 10).rounded()))) : 0 } ?? 0   // any use shows a block
-            let color = p.map(limitColor) ?? dim
-            add((i > 0 ? "\n" : "") + name.padding(toLength: nameWidth, withPad: " ", startingAt: 0) + " ", label)
-            add(String(repeating: "█", count: filled), color)
-            add(String(repeating: "░", count: cells - filled), p == nil ? dim : color.withAlphaComponent(0.35))
-            add(p.map { String(format: " %3d%%", Int($0)) } ?? "    –", p == nil ? dim : color)
+        var columns = [("5h", usage.five_hour, false), ("Week", usage.seven_day, true)]
+        if let model = usage.seven_day_model { columns.append((String((model.name ?? "Model").prefix(6)), model, true)) }
+        let small = NSFont.systemFont(ofSize: 9, weight: .semibold), big = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .bold)
+        let label = NSColor(white: 1, alpha: 0.7), dim = NSColor(white: 1, alpha: 0.35)
+        let day = DateFormatter()
+        day.locale = Locale(identifier: "id_ID")
+        day.dateFormat = "EEE"
+        let cells = columns.map { name, limit, weekly -> (top: NSAttributedString, bottom: NSAttributedString) in
+            let top = NSMutableAttributedString(string: name, attributes: [.font: small, .foregroundColor: label])
             if let reset = limit?.resets_at.map({ Date(timeIntervalSince1970: $0) }), reset > Date() {
-                add(" ↻" + resetLabel(reset, weekday: weekday), label.withAlphaComponent(0.5))
+                top.append(NSAttributedString(string: " ↻" + (weekly ? day.string(from: reset) : resetLabel(reset, weekday: false)),
+                                              attributes: [.font: small, .foregroundColor: dim]))
             }
+            let p = percent(limit)
+            let bottom = NSAttributedString(string: p.map { "\(Int($0))%" } ?? "–", attributes: [.font: big, .foregroundColor: p.map(limitColor) ?? dim])
+            return (top, bottom)
+        }
+        // Tab stops at each column's start, wide enough for its longer line.
+        var stops: [CGFloat] = [], x: CGFloat = 0
+        for cell in cells.dropLast() { x += ceil(max(cell.top.size().width, cell.bottom.size().width)) + 10; stops.append(x) }
+        func line(_ height: CGFloat) -> NSParagraphStyle {
+            let style = NSMutableParagraphStyle()
+            style.minimumLineHeight = height
+            style.maximumLineHeight = height
+            style.lineBreakMode = .byClipping
+            style.tabStops = stops.map { NSTextTab(textAlignment: .left, location: $0) }
+            return style
+        }
+        let text = NSMutableAttributedString()
+        for (row, height) in [(0, CGFloat(12)), (1, CGFloat(16))] {   // 28 of the Touch Bar's 30 pt
+            let start = text.length
+            if row > 0 { text.append(NSAttributedString(string: "\n")) }
+            for (i, cell) in cells.enumerated() {
+                if i > 0 { text.append(NSAttributedString(string: "\t", attributes: [.font: small])) }
+                text.append(row == 0 ? cell.top : cell.bottom)
+            }
+            text.addAttribute(.paragraphStyle, value: line(height), range: NSRange(location: start, length: text.length - start))
         }
         return text
-    }
-
-    private let smallFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
-
-    private func smallLines(height: CGFloat = 14, tabs: [CGFloat] = []) -> NSParagraphStyle {
-        let style = NSMutableParagraphStyle()
-        style.maximumLineHeight = height         // 14: two lines in the 30 pt Touch Bar, 10: three
-        style.minimumLineHeight = height
-        style.lineBreakMode = .byClipping
-        style.tabStops = tabs.map { NSTextTab(textAlignment: .left, location: $0) }
-        return style
     }
 
     private func twoLineLabel() -> NSTextField {
@@ -606,13 +611,13 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
             return item
         }
         switch id {
-        case .mic:
-            let hold = HoldView(image: icon("mic.fill", "Tahan buat ngomong ke Claude", claudeColor))
+        case .mic, .restingMic:
+            let hold = HoldView(image: icon("mic.fill", "Tahan buat ngomong ke Claude", claudeColor), width: id == .mic ? 64 : 44)
             hold.onHoldStart = { [weak self] in self?.micDown() }
             hold.onHoldEnd = { [weak self] in self?.micUp() }
             hold.onDoubleTap = { [weak self] in self?.micDown(stayOn: true) }
             hold.onTapWhileOn = { [weak self] in self?.micUp() }
-            micView = hold
+            if id == .mic { micView = hold } else { restingMicView = hold }
             return viewItem(id, hold)
         case .awake:
             let item = button(id, symbol: "cup.and.saucer", label: "Mac nyala terus", #selector(openAwake))
@@ -621,7 +626,6 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
             return item
         case .usage:                           // 5-hour and weekly Claude limits, updated live from usage.json
             let view = twoLineLabel()
-            view.maximumNumberOfLines = 3
             view.attributedStringValue = usageText()
             usageWidth = view.widthAnchor.constraint(equalToConstant: ceil(view.attributedStringValue.size().width) + 4)
             usageWidth?.isActive = true
@@ -676,7 +680,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         if bar !== typingBar { endTyping() }
         if talking, bar !== homeBar {            // the mic lives on the home bar: leaving it finishes the dictation
             talking = false
-            micView?.latched = false
+            micLatched(false)
             pressClaudeShortcut()
         }
         if bar === dateBar { dateScrubber.reloadData(); dateScrubber.selectedIndex = -1 }   // chips follow today's date
@@ -697,7 +701,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
     }
 
     private func dismissShownBar() {
-        if talking { talking = false; micView?.latched = false; pressClaudeShortcut() }   // bar gone: finish the dictation
+        if talking { talking = false; micLatched(false); pressClaudeShortcut() }   // bar gone: finish the dictation
         if let shown = shownBar { classCall(NSTouchBar.self, "dismissSystemModalTouchBar:", shown) }
         shownBar = nil
         barWatch?.invalidate()
@@ -780,6 +784,7 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
 
     private func hideResting() {
         guard restingShown else { return }
+        if talking, shownBar == nil { talking = false; micLatched(false); pressClaudeShortcut() }   // its mic was on
         classCall(NSTouchBar.self, "dismissSystemModalTouchBar:", restingBar)
         restingShown = false
         showStripButton()
@@ -1533,14 +1538,14 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
             return
         }
         talking = true
-        micView?.latched = stayOn
+        micLatched(stayOn)
         pressClaudeShortcut()                 // start dictating
     }
 
     private func micUp() {
         guard talking else { return }
         talking = false
-        micView?.latched = false
+        micLatched(false)
         pressClaudeShortcut()                 // finish dictating
         dismissShownBar()
     }
