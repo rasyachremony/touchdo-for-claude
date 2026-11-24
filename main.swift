@@ -304,9 +304,11 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
     // Claude app. Yellow ones wait for you.
     private lazy var sessionScrubber = makeScrubber(width: 300)
     private var sessions: [Session] = []
+    private var openedSession: Int32?        // the one you tapped last: kept at the far left, a little brighter
 
     private func showSessions() {
-        let active = Session.active()
+        var active = Session.active()
+        if let i = active.firstIndex(where: { $0.pid == openedSession }) { active.insert(active.remove(at: i), at: 0) }
         // Room right of the limits: the app area is 685 pt, less gaps and edges (measured on the device).
         let room = max(90, 600 - (usageWidth?.constant ?? 210) - (planWidth?.constant ?? 50))
         sessionScrubber.constraints.first { $0.firstAttribute == .width }?.constant = room
@@ -339,6 +341,9 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
     private func openSession(_ index: Int) {
         sessionScrubber.selectedIndex = -1          // so tapping the same chip again opens it again
         guard sessions.indices.contains(index), let link = sessions[index].appLink else { return NSSound.beep() }
+        openedSession = sessions[index].pid
+        showSessions()
+        sessionScrubber.scrollItem(at: 0, to: .leading)
         NSWorkspace.shared.open(link)
     }
 
@@ -892,7 +897,9 @@ final class App: NSObject, NSApplicationDelegate, NSTouchBarDelegate, NSScrubber
         } else if scrubber === sessionScrubber {
             chip.textField.attributedStringValue = sessionText(index)
             let waiting = sessions.indices.contains(index) && sessions[index].needsYou
-            chip.layer?.backgroundColor = (waiting ? NSColor.systemYellow.withAlphaComponent(0.25) : NSColor(white: 1, alpha: sessions.isEmpty ? 0 : 0.1)).cgColor
+            let opened = sessions.indices.contains(index) && sessions[index].pid == openedSession
+            chip.layer?.backgroundColor = (waiting ? NSColor.systemYellow.withAlphaComponent(opened ? 0.4 : 0.25)
+                                           : NSColor(white: 1, alpha: sessions.isEmpty ? 0 : opened ? 0.28 : 0.1)).cgColor
         } else {
             chip.textField.attributedStringValue = chipText(index)
             let tint = todos.indices.contains(index) ? urgency(todos[index]) : nil

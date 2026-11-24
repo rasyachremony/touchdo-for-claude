@@ -15,7 +15,7 @@ Nggak perlu bolak-balik buka jendela cuma buat ngecek sisa limit Claude. Semuany
   Hijau, kuning mulai 50%, merah mulai 80%. Ke-update tiap menit.
 - **Total token**: tulisan kecil di bawah plan, semua token yang sudah dipakai Claude Code di Mac ini, misalnya "10.2B token".
 - **Sesi**: sesi Claude Code yang lagi kerja, dan sudah berapa lama, berjejer dan bisa di-geser. Tap satu buat
-  membukanya di app Claude. Sesi yang nunggu izin atau jawaban kamu jadi **kuning** dan pindah ke depan.
+  membukanya di app Claude; sesi itu pindah ke paling kiri biar jelas mana yang kamu buka. Sesi yang nunggu izin atau jawaban kamu jadi **kuning** dan pindah ke depan.
 - **To-do**: tambah, centang, kasih deadline dari Touch Bar atau menu bar.
 - **Sampah**: to-do yang dihapus disimpan 30 hari di menu **Sampah** di menu bar, jadi bisa dipulihkan.
 - **Pesawat kertas**: kirim to-do ke sesi Claude Code baru (masih eksperimen).
